@@ -1,0 +1,166 @@
+const express = require('express');
+const multer = require('multer');
+const cloudinary = require('cloudinary').v2;
+
+// Cloudinary is already configured in index.js
+
+const router = express.Router();
+
+
+// Upload Image
+const uploadImage = async (imageBuffer) => {
+    try {
+        const result = await cloudinary.uploader.upload(imageBuffer, {
+            use_filename: true,
+            unique_filename: false,
+            overwrite: true,
+            resource_type: 'auto',
+            folder: process.env.cloud_folder || 'task-upload',
+        });
+        return result;
+    } catch (error) {
+        console.error('Upload error:', error);
+        throw error;
+};
+
+// Get asset info with colors
+const getAssetInfo = async (publicId) => {
+    try {
+        const options = {
+            colors: true,
+        };
+        const result = await cloudinary.api.resource(publicId, options);
+        return result.colors;
+    } catch (error) {
+        console.error('Get asset info error:', error);
+        throw error;
+};
+
+// Create transformed image tag
+const createImageTag = (publicId, ...colors) => {
+    const [effectColor, backgroundColor] = colors;
+    
+    let imageTag = cloudinary.image(publicId, {
+        transformation: [
+            { width: 250, height: 250, gravity: 'faces', crop: 'thumb' },
+            { radius: 'max' },
+            { effect: 'outline:10', color: effectColor },
+            { background: backgroundColor },
+        ],
+    });
+    
+    return imageTag;
+};
+
+// Multer configuration for file uploads
+const storage = multer.memoryStorage();
+const upload = multer({ storage: storage });
+
+// Routes
+// Upload image from file
+router.post('/upload', upload.single('image'), async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ error: 'No image file provided' });
+        }
+        
+        const result = await uploadImage(req.file.buffer);
+        res.json({ 
+            success: true, 
+            data: result,
+            public_id: result.public_id,
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+});
+
+// Upload image from URL
+router.post('/upload-url', async (req, res) => {
+    try {
+        const { imageUrl } = req.body;
+        if (!imageUrl) {
+            return res.status(400).json({ error: 'No image URL provided' });
+        }
+        
+        const result = await uploadImage(imageUrl);
+        res.json({ 
+            success: true, 
+            data: result,
+            public_id: result.public_id,
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+});
+
+// Get asset information
+router.get('/asset-info/:publicId', async (req, res) => {
+    try {
+        const { publicId } = req.params;
+        const colors = await getAssetInfo(publicId);
+        res.json({ success: true, colors });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+});
+
+// Get transformed image
+router.get('/transform/:publicId', async (req, res) => {
+    try {
+        const { publicId } = req.params;
+        const colors = await getAssetInfo(publicId);
+        
+        if (colors && colors.length >= 2) {
+            const imageTag = createImageTag(publicId, colors[0][0], colors[1][0]);
+            res.json({ 
+                success: true, 
+                imageTag,
+                transformedUrl: cloudinary.url(publicId, {
+                    transformation: [
+                        { width: 250, height: 250, gravity: 'faces', crop: 'thumb' },
+                        { radius: 'max' },
+                        { effect: 'outline:10', color: colors[0][0] },
+                        { background: colors[1][0] },
+                    ]
+                })
+            });
+        } else {
+            res.status(400).json({ error: 'Not enough colors found for transformation' });
+        }
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+});
+
+// Demo endpoint that runs the complete workflow
+router.post('/demo', async (req, res) => {
+    try {
+        // Use a sample image URL for demo
+        const imageUrl = 'https://cloudinary-devs.github.io/cld-docs-assets/assets/images/happy_people.jpg';
+        
+        // Upload the image
+        const uploadResult = await uploadImage(imageUrl);
+        const publicId = uploadResult.public_id;
+        
+        // Get the colors in the image
+        const colors = await getAssetInfo(publicId);
+        
+        // Create an image tag with transformations
+        const imageTag = createImageTag(publicId, colors[0][0], colors[1][0]);
+        
+        res.json({
+            success: true,
+            uploadResult,
+            colors,
+            imageTag,
+            transformedUrl: cloudinary.url(publicId, {
+                transformation: [
+                    { width: 250, height: 250, gravity: 'faces', crop: 'thumb' },
+                    { radius: 'max' },
+                    { effect: 'outline:10', color: colors[0][0] },
+                    { background: colors[1][0] },
+                ]
+            })
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+});
+
+module.exports = router;
