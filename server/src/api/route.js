@@ -52,6 +52,7 @@ const upload = multer({
 
 router.post("/upload", upload.single("image"), async (req, res) => {
   try {
+    console.log("Upload request received:", req.file);
     if (!req.file) {
       return res.status(400).json({ error: "No file uploaded" });
     }
